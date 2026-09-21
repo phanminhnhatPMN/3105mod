@@ -186,9 +186,9 @@ enum PatchPackageError: Error, Equatable {
     case activePatchCannotBeDeleted
     case privatePatchRequiresPassword
     case privateOperationFailed
-    case applyFailed
-    case restoreFailed
-    case resetFailed
+    case applyFailed(String? = nil)
+    case restoreFailed(String? = nil)
+    case resetFailed(String? = nil)
     case invalidImportLink
     case remoteImportFailed
 }
@@ -235,6 +235,8 @@ extension PatchPackageError: LocalizedError {
             return bundleID
         case .restoreTargetsChanged(let paths):
             return paths.joined(separator: "\n")
+        case .applyFailed(let reason), .restoreFailed(let reason), .resetFailed(let reason):
+            return reason
         default:
             return nil
         }

@@ -1172,7 +1172,11 @@ private struct PatchProjectDetailView: View {
             } catch {
                 await MainActor.run {
                     isWorking = false
-                    actionAlert = PatchStoreAlert(titleKey: "common.failed", messageKey: "patch.error.apply")
+                    actionAlert = PatchStoreAlert(
+                        titleKey: "common.failed",
+                        messageKey: "patch.error.apply",
+                        messageArgument: error.localizedDescription
+                    )
                 }
             }
         }

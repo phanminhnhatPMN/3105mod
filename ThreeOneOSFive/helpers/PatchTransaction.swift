@@ -210,7 +210,7 @@ enum PatchTransaction {
         do {
             try fileManager.createDirectory(at: transactionDirectory, withIntermediateDirectories: true)
         } catch {
-            throw PatchPackageError.applyFailed
+            throw PatchPackageError.applyFailed("Không thể tạo thư mục lưu backup tại \(transactionDirectory.path): \(error.localizedDescription)")
         }
 
         var records: [Record] = []
@@ -240,7 +240,7 @@ enum PatchTransaction {
                     let appliedURL = transactionDirectory.appendingPathComponent(appliedFilename)
                     try resolved.rule.replacementData.write(to: appliedURL, options: .atomic)
                     guard try digestFile(appliedURL) == replacementDigest else {
-                        throw PatchPackageError.applyFailed
+                        throw PatchPackageError.applyFailed("Mã băm file áp dụng không khớp: \(appliedURL.path)")
                     }
                 }
                 records.append(Record(
@@ -258,7 +258,7 @@ enum PatchTransaction {
         } catch let error as PatchPackageError {
             throw error
         } catch {
-            throw PatchPackageError.applyFailed
+            throw PatchPackageError.applyFailed("Không thể sao lưu file đích: \(error.localizedDescription)")
         }
 
         let journalURL = transactionDirectory.appendingPathComponent(journalFilename)
@@ -274,7 +274,7 @@ enum PatchTransaction {
         do {
             try writeJournal(journal, to: journalURL)
         } catch {
-            throw PatchPackageError.applyFailed
+            throw PatchPackageError.applyFailed("Không thể ghi nhật ký (journal): \(error.localizedDescription)")
         }
 
         do {
@@ -293,7 +293,7 @@ enum PatchTransaction {
                     fileManager: fileManager
                 )
                 guard try digestFile(resolved.target) == records[index].replacementDigest else {
-                    throw PatchPackageError.applyFailed
+                    throw PatchPackageError.applyFailed("Mã băm file sau khi ghi không khớp với dữ liệu patch: \(resolved.target.path)")
                 }
             }
             journal.status = .applied
@@ -303,7 +303,7 @@ enum PatchTransaction {
                 projectID: project.id,
                 journalURL: journalURL
             )
-        } catch {
+        } catch let writeError {
             do {
                 try restoreRecords(
                     records,
@@ -318,7 +318,10 @@ enum PatchTransaction {
             } catch {
                 // Preserve the prepared journal and backups for explicit recovery.
             }
-            throw PatchPackageError.applyFailed
+            if let patchErr = writeError as? PatchPackageError {
+                throw patchErr
+            }
+            throw PatchPackageError.applyFailed("Lỗi khi ghi file đích: \(writeError.localizedDescription)")
         }
     }
 
@@ -851,14 +854,14 @@ enum PatchTransaction {
             cursor.appendPathComponent(component, isDirectory: true)
             guard fileManager.fileExists(atPath: cursor.path) else {
                 if allowMissingParents { break }
-                throw PatchPackageError.applyFailed
+                throw PatchPackageError.applyFailed("Thư mục cha không tồn tại: \(cursor.path)")
             }
             let values = try cursor.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             guard values.isSymbolicLink != true else {
                 throw PatchPackageError.symbolicLinkUnsupported
             }
             guard values.isDirectory == true else {
-                throw PatchPackageError.applyFailed
+                throw PatchPackageError.applyFailed("Đường dẫn cha không phải là thư mục: \(cursor.path)")
             }
         }
         if fileManager.fileExists(atPath: target.path) {
@@ -867,7 +870,7 @@ enum PatchTransaction {
                 throw PatchPackageError.symbolicLinkUnsupported
             }
             guard values.isDirectory != true else {
-                throw PatchPackageError.applyFailed
+                throw PatchPackageError.applyFailed("Đích đến là một thư mục có sẵn, không thể ghi đè file: \(target.path)")
             }
         }
     }
@@ -889,13 +892,13 @@ enum PatchTransaction {
                 throw PatchPackageError.symbolicLinkUnsupported
             }
             guard values.isDirectory == true else {
-                throw PatchPackageError.applyFailed
+                throw PatchPackageError.applyFailed("Đường dẫn cha không phải là thư mục: \(cursor.path)")
             }
         }
         if fileManager.fileExists(atPath: target.path) {
             let values = try target.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             guard values.isSymbolicLink != true, values.isDirectory == true else {
-                throw PatchPackageError.applyFailed
+                throw PatchPackageError.applyFailed("Đích đến bị trùng với một file thường: \(target.path)")
             }
         }
     }
@@ -921,14 +924,15 @@ enum PatchTransaction {
             if let protection = current[.protectionKey] { attributes[.protectionKey] = protection }
         }
         guard fileManager.createFile(atPath: staging.path, contents: data, attributes: attributes) else {
-            throw PatchPackageError.applyFailed
+            throw PatchPackageError.applyFailed("Không thể tạo file tạm tại: \(staging.path). Vui lòng kiểm tra quyền ghi hoặc thư mục đích.")
         }
         defer { try? fileManager.removeItem(at: staging) }
         let handle = try FileHandle(forWritingTo: staging)
         try handle.synchronize()
         try handle.close()
         guard rename(staging.path, target.path) == 0 else {
-            throw PatchPackageError.applyFailed
+            let errStr = String(cString: strerror(errno))
+            throw PatchPackageError.applyFailed("Không thể đổi tên/ghi đè file tạm sang đích: \(target.path) (Mã lỗi: \(errStr))")
         }
     }
 
