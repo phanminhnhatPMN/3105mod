@@ -57,9 +57,33 @@ enum PatchProjectLibrary {
         return root
     }
 
+    private static func autoImportBundledPackages(root: URL, fileManager: FileManager) {
+        var candidates: [URL] = []
+        if let bundleURLs = Bundle.main.urls(forResourcesWithExtension: "3105", subdirectory: nil) {
+            candidates.append(contentsOf: bundleURLs)
+        }
+        if let espaimURL = Bundle.main.url(forResource: "Espaim", withExtension: "3105") {
+            if !candidates.contains(espaimURL) {
+                candidates.append(espaimURL)
+            }
+        }
+        if let docURL = try? fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false) {
+            if let docFiles = try? fileManager.contentsOfDirectory(at: docURL, includingPropertiesForKeys: nil) {
+                candidates.append(contentsOf: docFiles.filter { $0.pathExtension.lowercased() == "3105" })
+            }
+        }
+        for candidate in candidates {
+            let target = root.appendingPathComponent(candidate.lastPathComponent)
+            if !fileManager.fileExists(atPath: target.path) {
+                try? fileManager.copyItem(at: candidate, to: target)
+            }
+        }
+    }
+
     static func load(fileManager: FileManager = .default) -> [PatchLibraryItem] {
-        guard let root = try? packageRootURL(fileManager: fileManager),
-              let urls = try? fileManager.contentsOfDirectory(
+        guard let root = try? packageRootURL(fileManager: fileManager) else { return [] }
+        autoImportBundledPackages(root: root, fileManager: fileManager)
+        guard let urls = try? fileManager.contentsOfDirectory(
                 at: root,
                 includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
                 options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]

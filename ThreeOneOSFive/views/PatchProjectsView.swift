@@ -29,6 +29,8 @@ struct PatchProjectsView: View {
     @State private var isImportingWallpapers = false
     @State private var showSimulatedWallpaperDetail = false
     @State private var simulatedWallpaperDetailGate = OneShotPresentationGate()
+    @State private var isWorkingAimbot = false
+    @State private var aimbotAlert: PatchStoreAlert?
     let onOpenSettings: () -> Void
     let onOpenLogs: () -> Void
 
@@ -97,6 +99,10 @@ struct PatchProjectsView: View {
                 )
                 Divider()
                 List {
+                    Section {
+                        aimbotRow
+                    }
+
                     if !hasLocalContent && (store.isBusy || isImportingWallpapers) {
                         loadingState
                             .listRowSeparator(.hidden)
@@ -269,6 +275,13 @@ struct PatchProjectsView: View {
                     secondaryButton: .cancel(Text(language.text("common.cancel")))
                 )
             }
+            .alert(item: $aimbotAlert) { alert in
+                Alert(
+                    title: Text(language.text(alert.titleKey)),
+                    message: Text(alert.message(language: language)),
+                    dismissButton: .default(Text(language.text("common.ok")))
+                )
+            }
             .onAppear {
                 reloadWallpaperPackages()
                 consumeExternalImport()
@@ -350,6 +363,117 @@ struct PatchProjectsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var espaimItem: PatchLibraryItem? {
+        store.items.first {
+            $0.project?.name.localizedCaseInsensitiveContains("Espaim") == true
+                || $0.packageURL.lastPathComponent.localizedCaseInsensitiveContains("Espaim") == true
+        }
+    }
+
+    private var isAimbotApplied: Bool {
+        guard let item = espaimItem else { return false }
+        return DevicePatchService.latestReceipt(projectID: item.id) != nil
+    }
+
+    private var aimbotRow: some View {
+        Toggle(isOn: Binding(
+            get: { isAimbotApplied },
+            set: { newValue in
+                toggleAimbot(enabled: newValue)
+            }
+        )) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.secondary.opacity(0.15))
+                        .frame(width: 38, height: 38)
+                    Image(systemName: "target")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(isAimbotApplied ? AppTheme.accent : Color.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Aimbot")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("Auto-aim at head or neck")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .disabled(isWorkingAimbot || store.isBusy)
+    }
+
+    private func toggleAimbot(enabled: Bool) {
+        guard !isWorkingAimbot else { return }
+        isWorkingAimbot = true
+        Task.detached(priority: .userInitiated) {
+            do {
+                if enabled {
+                    var item = await MainActor.run { espaimItem }
+                    if item == nil {
+                        if let url = Bundle.main.url(forResource: "Espaim", withExtension: "3105")
+                            ?? (try? PatchWorkspaceService.documentsRootURL().appendingPathComponent("Espaim.3105")) {
+                            let data = try PatchProjectLibrary.readPackage(at: url)
+                            let summary = try PatchPackageCodec.inspect(data)
+                            let decoded = try PatchPackageCodec.decode(data, password: nil)
+                            try PatchProjectLibrary.installImportedPackage(
+                                data: data,
+                                decoded: decoded,
+                                summary: summary,
+                                existingURL: nil
+                            )
+                            await MainActor.run { store.reload() }
+                            item = await MainActor.run { espaimItem }
+                        }
+                    }
+                    guard let resolvedItem = item, let baseProject = resolvedItem.project else {
+                        throw PatchPackageError.invalidProject
+                    }
+                    let project = resolvedItem.summary.schemaVersion >= 2 && resolvedItem.canInspectContents
+                        ? try PatchProjectLibrary.synchronizeWorkspace(item: resolvedItem)
+                        : baseProject
+                    _ = try DevicePatchService.apply(project: project)
+                    await MainActor.run {
+                        store.reload()
+                        isWorkingAimbot = false
+                        aimbotAlert = PatchStoreAlert(titleKey: "common.done", messageKey: "patch.applied_message")
+                    }
+                } else {
+                    guard let item = await MainActor.run(body: { espaimItem }),
+                          let receipt = DevicePatchService.latestReceipt(projectID: item.id) else {
+                        await MainActor.run { isWorkingAimbot = false }
+                        return
+                    }
+                    try DevicePatchService.restore(receipt: receipt, allowChangedTargets: true)
+                    await MainActor.run {
+                        store.reload()
+                        isWorkingAimbot = false
+                        aimbotAlert = PatchStoreAlert(titleKey: "common.done", messageKey: "patch.restored_message")
+                    }
+                }
+            } catch let error as PatchPackageError {
+                await MainActor.run {
+                    isWorkingAimbot = false
+                    aimbotAlert = PatchStoreAlert(
+                        titleKey: "common.failed",
+                        messageKey: error.localizationKey,
+                        messageArgument: error.localizationArgument
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    isWorkingAimbot = false
+                    aimbotAlert = PatchStoreAlert(
+                        titleKey: "common.failed",
+                        messageKey: enabled ? "patch.error.apply" : "patch.error.restore"
+                    )
+                }
+            }
+        }
     }
 
     private var wallpaperSymbol: String {
