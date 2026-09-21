@@ -682,6 +682,44 @@ private struct PatchProjectDetailView: View {
     var body: some View {
         List {
             if let item, let project = item.project {
+                if project.name.localizedCaseInsensitiveContains("Espaim")
+                    || project.name.localizedCaseInsensitiveContains("Aimbot")
+                    || item.packageURL.lastPathComponent.localizedCaseInsensitiveContains("Espaim") {
+                    Section {
+                        Toggle(isOn: Binding(
+                            get: { receipt != nil },
+                            set: { newValue in
+                                if newValue {
+                                    apply()
+                                } else {
+                                    restore(allowChangedTargets: true)
+                                }
+                            }
+                        )) {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color.secondary.opacity(0.15))
+                                        .frame(width: 38, height: 38)
+                                    Image(systemName: "target")
+                                        .font(.system(size: 20, weight: .semibold))
+                                        .foregroundStyle(receipt != nil ? AppTheme.accent : Color.secondary)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Aimbot")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    Text("Auto-aim at head or neck")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .disabled(isWorking)
+                    }
+                }
+
                 Section(language.text("patch.information")) {
                     if !project.author.isEmpty {
                         patchInfoRow(
